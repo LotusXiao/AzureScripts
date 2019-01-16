@@ -1,0 +1,4 @@
+﻿Name,SubscriptionName,ResourceGroupName,Time,TimeZone,WebhookUrl,Email,Disable
+DebianSve,MAIC - Tek Experts BGR - v-kapetr,Sve,08:00,FLE Standard Time,,,
+UbuntuSve,MAIC - Tek Experts BGR - v-kapetr,Sve,14:00,FLE Standard Time,,,
+SveWinServ,MAIC - Tek Experts BGR - v-kapetr,Sve,22:00,FLE Standard Time,,,
