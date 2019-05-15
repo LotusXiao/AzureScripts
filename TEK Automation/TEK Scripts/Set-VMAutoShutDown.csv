@@ -1,0 +1,4 @@
+﻿Name,SubscriptionName,ResourceGroupName,Time,TimeZone,WebhookUrl,Email,Disable
+TestMachine1,MAIC - Tek Experts BGR - v-kapetr,TestDelete1,18:00,FLE Standard Time,,,1
+TestMachine3,MAIC - Tek Experts BGR - v-kapetr,TestDelete3,01:00,FLE Standard Time,,,1
+,,,,,,,

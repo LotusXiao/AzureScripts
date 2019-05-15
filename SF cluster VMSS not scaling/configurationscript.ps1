@@ -1,0 +1,1 @@
+get-date >> log.txt

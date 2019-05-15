@@ -1,0 +1,2 @@
+Testing custom script extension execution.
+Download script from URI and run locally.

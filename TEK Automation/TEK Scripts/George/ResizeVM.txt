@@ -1,0 +1,169 @@
+﻿#################################################################
+# George Strimenos 12/2018
+# Placing these variables at the top for ease of modification.   These can be made into parameters depending on how we choose to automate this.
+
+$script:shutdown_time = "1730"                              # Sets the scheduled shutdown 
+# $OnlyRunThisSub = "22093505-70e0-41f0-b032-988f9cf0a866"  # Insert a subscription ID between the quote marks if you want to run the script on a single subscription. 
+$OnlyRunThisSub = ""                                        # Example: $OnlyRunThisSub = "06058ed4-ee94-4350-b1c4-e2ba91299a03"
+                                                            # Leaving the quote marks empty will run the script for all subscriptions you own
+$ExcludeSub = "06058ed4-ee94-4350-b1c4-e2ba91299a03"        # To exclude a subscription  - I needed this for testing  
+####################################################################
+
+function main{
+    #Connect-AzureRmAccount
+    $starttime = get-date 
+    MainLoop
+    $Endtime = get-date  #Added these time stamps for testing purposes. Can be left or removed.
+    write-host " "
+    write-host "Start time:" $starttime
+    write-host "End time  :" $Endtime
+    $elapsedtime = $endtime - $starttime | select hours,minutes,seconds
+    write-host "Elapsed time:" $elapsedtime  
+    }
+
+
+# It will get all the Virtual Machines according to the Subscriptions I own
+    function MainLoop{ 
+
+    $Subs = (Get-AzureRMSubscription).ID # It will get all the Subscriptions I own
+    ForEach ($sub in $Subs) {
+       if ($OnlyRunThisSub -ne "" -and $sub -ne $OnlyRunThisSub) { continue } # if a Test Sub has been entered, then continue to the next loop until the entered sub shows up. 
+       if ($sub -ne $ExcludeSub) {
+            ###Get-AzureRmSubscription -SubscriptionId $sub | Select-AzureRMSubscription
+            Set-AzureRmContext -subscriptionid $sub | out-null
+            $AllVMs = Get-AzureRMVM # It will get all the VMs each Subscription has
+            ### AcceleratedNetworking $resourceGroup   # we dont need to run this for now because Accelerated Networking is not available for Standard_B2ms. Will keep this here for now.
+            ForEach ($vm in $AllVMs){
+              ### Cores $AllVMs $vm      Cores are already checked in the resize function, so this is duplication       
+              VMs-ReSize $vm.ResourceGroupName $vm.Name $vm # Function that will resize each VM
+		      Auto-Shutdown $vm.ResourceGroupName $vm.Name 
+            }
+           # $AllVMs = "" # This cleans the array which has the VMs per Subscription so it won't run on top of them
+       }
+    }        
+   }
+    
+
+
+# It will re-size the VMs according to some validations
+    function VMs-ReSize($resourceGroup, $vmName, $vm, $VMs){
+        $size = $vm.HardwareProfile.VMsize
+        $location=$vm.location
+        $cores = Get-AzureRmVMSize -Location $location | ?{$_.Name -eq $size} | Select -ExpandProperty NumberOfCores  # Number of Cores of the Virtual Machine  
+        $ram = Get-AzureRmVMSize -Location $location | ?{$_.Name -eq $size} | Select -ExpandProperty MemoryInMB  # Memory of the Virtual Machine in MB
+        $disk = Get-AzureRmVMSize -Location $location | ?{$_.Name -eq $size} | Select -ExpandProperty MaxDataDiskCount  # Disk Count of the Virtual Machine
+      
+        if ($cores -gt 2 -or $ram -gt 8192 -or $disk -gt 4) { # If the VM has more than 2 cores, or more than 8GB of ram, or more than 4 disks, it will be resized 
+            listedSizes $resourceGroup $vmName $vm  # It will validate if the VM has the size we selected as default
+        
+            write-host "Resize needed for" $VMname "- currently at" $size "in" $location    
+            $status = Update-AzureRmVM -VM $vm -ResourceGroupName $resourceGroup -AsJob #| out-null # This will re-size it    
+            if($Status -eq $null) { Write-Output "Error occured during resize operation on $($VMname)." } 
+            else
+            { Write-Output "Successfully resized $($VMname)" } 
+        
+        } 
+    }
+
+
+
+
+# It will validate if the VM has the size available in its cluster to make the resize properly
+    function listedSizes ($resourceGroup, $vmName, $vm){ 
+
+       ## AcceleratedNetworking $resourceGroup moved to subs level so it didnt get repeated for each vm
+        $availableSizes = Get-AzureRmVMSize -ResourceGroupName $resourceGroup -VMName $vmName | Select -ExpandProperty Name # It gives me the Sizes that the VM has available 
+        ForEach ($availableSize in $availableSizes) {
+            if ($availableSize -eq "Standard_B2ms"){ # Validates if the default size is part of the available sizes of the VM. If it is, it will change it without any other action needed.
+                $vm.HardwareProfile.VmSize = "Standard_B2ms" 
+                break
+                # return
+            }
+        }
+        availabilitySet $resourceGroup # It validates if the VM is part of an Availability Set
+        if ($vm.HardwareProfile.VmSize -ne "Standard_B2ms") {
+          Stop-AzureRmVM -ResourceGroupName $resourceGroup -Name $vmName -Force # If the size is not listed, the VM needs to be stopped first
+          write-host $VMname " is in a region where the standard size is not available!"
+        } 
+   }
+
+
+
+
+# It validates if the VM is part of an Availability Set
+    function availabilitySet ($resourceGroup){ 
+        $availabilitySet = Get-AzureRmAvailabilitySet -ResourceGroupName $resourceGroup
+            if ($availabilitySet){ # If the VM is part of an Availability Set
+                $vmIds = $availabilitySet.VirtualMachinesReferences
+                foreach ($vmId in $vmIDs){ # It stops all the VMs within the Availability Set
+                    $string = $vmID.Id.Split("/")
+                    $vmName = $string[8]
+                    Stop-AzureRmVM -ResourceGroupName $resourceGroup -Name $vmName -Force
+                    write-host $VMname " is part of an availability set!"  
+                } 
+            }
+    }
+	
+	
+# It sets the Auto-Shutdown time based on each country time zone
+	function Auto-Shutdown ($resourcegroup, $vmName){
+
+$shutdown_timezone = Get-TimeZone | Select -ExpandProperty ID # It gets the time zone of each country
+$location = Get-AzureRmVM -ResourceGroupName $resourcegroup -VMName $VMname | Select -ExpandProperty Location
+$VMResourceId = (Get-AzureRmVM -ResourceGroupName $resourcegroup -Name $VMname).Id
+$DevTestLabsResourceId = "/subscriptions/$Sub/resourceGroups/$resourcegroup/providers/microsoft.devtestlab/schedules/shutdown-computevm-$VMname"
+$shutdownprop = Get-AzureRmResource -ResourceId $DevTestLabsResourceId 
+
+# If auto-shutdown is not enabled then set it to enabled with the given time
+if ($shutdownprop.properties.status -ne "Enabled") {
+write-host "Auto-Shutdown enabled for " $VMname
+
+# Build the Autoshutdown properties
+$Properties = @{}
+$Properties.Add('status', 'Enabled')
+$Properties.Add('taskType', 'ComputeVmShutdownTask')
+$Properties.Add('dailyRecurrence', @{'time'= $shutdown_time})
+$Properties.Add('timeZoneId', $shutdown_timezone)
+$Properties.Add('notificationSettings', @{status='Disabled'; timeInMinutes=15})
+$Properties.Add('targetResourceId', $VMResourceId)
+
+New-AzureRmResource -Location $location -ResourceId $DevTestLabsResourceId  -Properties $Properties -Force -AsJob | Out-Null
+}
+    }
+
+
+# this function runs on all resource groups for each subscription since the get-nic command lists nics at the group level 
+    function AcceleratedNetworking ($resourceGroup){
+        $AllRGs = Get-AzureRmResourceGroup
+        foreach ($RG in $AllRGs) {
+        $nics = Get-AzureRMNetworkInterface -ResourceGroupName $RG.resourcegroupname ##$resourceGroup 
+        foreach ($nic in $nics){
+            if ($nic.EnableAcceleratedNetworking -eq $true){
+                $nic.EnableAcceleratedNetworking = $false
+                $nic | Set-AzureRmNetworkInterface | Out-Null
+                write-host "Disabled Accelerated Networking on " $nic.name 
+            } 
+        }
+        }
+    }
+
+
+    function Cores ($VMs, $vm){
+        $sum = 0
+        foreach ($vm1 in $VMs){
+            Get-AzureRmVM -ResourceGroupName $vm1.ResourceGroupName -Name $vm1.Name
+            $size = (Get-AzureRmVM -ResourceGroupName $vm1.ResourceGroupName -VMName $vm1.Name).HardwareProfile.VmSize # It gives me the original size of the VM which I need to get the properties of it
+            $location = Get-AzureRmVM -ResourceGroupName $vm1.ResourceGroupName -VMName $vm1.Name | Select -ExpandProperty Location # It will store the location of the VM because I need it for VMS-Resize function
+            $cores = Get-AzureRmVMSize -Location $location | ?{$_.Name -eq $size} | Select -ExpandProperty NumberOfCores  # Number of Cores of the Virtual Machine
+            $sum = $cores + $sum
+        }
+        if ($sum -ge 8) {
+            Stop-AzureRmVM -ResourceGroupName $vm.ResourceGroupName -Name $vm.Name -Force
+        }
+    }
+    
+main
+
+
+
+    

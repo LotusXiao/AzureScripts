@@ -1,0 +1,28 @@
+﻿#################################################################
+# George Strimenos 2/2019
+# List Role Assignments per subscription
+################################################################# 
+
+$log = "C:\temp\AzureSubsReport-$env:username.txt"
+
+#$OnlyRunThisSub = "22093505-70e0-41f0-b032-988f9cf0a866"   # Insert a subscription ID between the quote marks if you want to run the script on a single subscription. 
+$OnlyRunThisSub = ""                                        # Example: $OnlyRunThisSub = "06058ed4-ee94-4350-b1c4-e2ba91299a03"
+                                                            # Leaving the quote marks empty will run the script for all subscriptions you own
+#$ExcludeSub = "22093505-70e0-41f0-b032-988f9cf0a866"        # To exclude a subscription  - Useful for testing
+####################################################################
+#connect-azaccount
+    $Subs = (Get-AZSubscription)  # Get all Subscriptions 
+    New-Item -ItemType Directory -Force -Path C:\temp |out-null
+    "`n**** Azure Subscription Report - $env:username ****" | tee $log
+    " " | Out-File $log -Append
+   
+    ForEach ($sub in $Subs) {
+       if ($OnlyRunThisSub -ne "" -and $sub.id -ne $OnlyRunThisSub) { continue } # if a Test Sub has been entered, then continue to the next loop until the entered sub shows up. 
+       if ($sub.id -ne $ExcludeSub) {
+            Set-AZContext -subscriptionid $sub.id | out-null
+            "`nSubscription: $($sub.name)" | tee -FilePath $log -Append
+            Get-AzRoleAssignment | Format-Table -Property RoleDefinitionName, DisplayName, SignInName | tee -FilePath $log -Append
+                        
+     } }
+
+  write-host "`n**** Report saved to " $log "****"

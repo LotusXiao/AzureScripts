@@ -1,0 +1,25 @@
+﻿Login-AzureRmAccount 
+$Subs = Get-AzureRmSubscription 
+
+$cont = 0
+
+Foreach($sub in $Subs){
+Write-Host "[$cont]" $sub.Name
+$cont++
+}
+
+$SelectedSub = Read-Host "Which subscription would you like to delete the contents"
+
+Write-Host "Selected subscription is " $Subs[$SelectedSub].Name "Subscription Id: "  $Subs[$SelectedSub].Id
+
+Set-AzureRMContext -Subscription $Subs[$SelectedSub].Id
+
+$ResourceGrps = Get-AzureRmResourceGroup 
+
+foreach ($rg in $ResourceGrps){
+
+Write-Host $rg.ResourceGroupName
+
+Remove-AzureRmResourceGroup -Name $rg.ResourceGroupName -Force -AsJob
+}
+
